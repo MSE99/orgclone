@@ -116,7 +116,7 @@ const cloneRepos = async (
                     `Attempted to clone the repo ${MAXIMUM_ATTEMPT_COUNT} and failed to clone`
                 );
                 Fs.appendFileSync(
-                    Path.join(),
+                    Path.join(process.cwd(), "orgCloneErrors.log.txt"),
                     `\n\n ${new Date().toISOString()} Failed to clonse ${JSON.stringify(
                         det,
                         null,
