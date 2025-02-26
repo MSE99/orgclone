@@ -3,10 +3,14 @@ import prompt from 'prompts';
 import { Octokit } from '@octokit/rest'
 import Fs from 'fs'
 import Path from 'path'
-import { execSync } from 'child_process'
+import OS from 'os'
+import { exec as execWithCB } from 'child_process'
+import { promisify } from 'util'
 
+const exec = promisify(execWithCB)
+
+const availableParallelism = OS.availableParallelism()
 const tokenFilename = 'token'
-
 
 const saveTokenToDisk = (tk: string) => {
   Fs.writeFileSync(tokenFilename, tk)
@@ -58,6 +62,40 @@ const getTargetDirname = async () => {
   return response.dirname as string | null
 }
 
+const chunkArr = <T> (list: T[], chunkSize: number) => {
+  const result = []
+  let current = []
+
+  for (const item of list) {
+    current.push(item)
+
+    if (current.length === chunkSize) {
+      result.push(current)
+      current = []
+    }
+  }
+
+  if (current.length) {
+    result.push(current)
+    current = []
+  }
+
+  return result
+}
+
+const cloneRepos = async (entry: Array<{ sshUrl: string, name: string }>, cloneTo: string) => {
+  await Promise.all(
+    entry.map(async det => {
+      try {
+        console.log(`Cloning ${det.sshUrl}`)
+        await exec(`git clone ${det.sshUrl} ${Path.join(cloneTo, det.name)}`)
+      } catch (err) {
+        console.error('failed to clone ', det.sshUrl)
+      }
+    })
+  )
+}
+
 program.action(async () => {
   const token = await getToken()
   const org = await getOrg()
@@ -81,10 +119,9 @@ program.action(async () => {
   const repos = response.data
   const sortedRepos = [...repos].sort((a, b) => Number(a.size || 0) - Number(b.size || 0))
 
-
-  const repoDetails = sortedRepos.map(r => {
+  const repositoriesDetails = sortedRepos.map(r => {
     return {
-      sshUrl: r.ssh_url,
+      sshUrl: r.ssh_url as string,
       name: r.name
     }
   })
@@ -100,12 +137,12 @@ program.action(async () => {
     Fs.mkdirSync(cloneTo)
   }
 
-  for (const det of repoDetails) {
-    try {
-      execSync(`git clone ${det.sshUrl} ${Path.join(cloneTo, det.name)}`)
-    } catch (err) {
-      console.error('failed to clone ', det.sshUrl)
-    }
+  const firstEntry = repositoriesDetails.length > 0 ? [repositoriesDetails[0]] : []
+  const restOfEntries = repositoriesDetails.slice(1) 
+  const chunks = chunkArr([...firstEntry, ...restOfEntries], availableParallelism)
+
+  for (const chunk of chunks) {
+    await cloneRepos(chunk, cloneTo)
   }
 })
 
